@@ -2,14 +2,20 @@ package com.bank.service;
 
 import com.bank.dto.AccountResponseDTO;
 import com.bank.dto.CreateAccountDTO;
+import com.bank.dto.SoldeResponseDTO;
+import com.bank.dto.TransactionResponseDTO;
 import com.bank.exception.AccountAlreadyExistsException;
+import com.bank.exception.AccountNotFoundException;
 import com.bank.exception.InsufficientFundsException;
 import com.bank.model.Account;
+import com.bank.model.Transaction;
 import com.bank.repository.AccountRepository;
+import com.bank.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -19,13 +25,8 @@ import java.util.stream.Collectors;
 public class AccountService {
 
     private final AccountRepository accountRepository;
+    private final TransactionRepository transactionRepository;
 
-    /**
-     * Crée un nouveau compte bancaire
-     * @param createAccountDTO les informations du compte à créer
-     * @return le compte créé
-     * @throws AccountAlreadyExistsException si l'email existe déjà
-     */
     public AccountResponseDTO createAccount(CreateAccountDTO createAccountDTO) {
         if (accountRepository.findByEmail(createAccountDTO.getEmail()).isPresent()) {
             throw new AccountAlreadyExistsException(
@@ -44,34 +45,51 @@ public class AccountService {
         return convertToDTO(savedAccount);
     }
 
-    public AccountResponseDTO deposit(Long accountId, java.math.BigDecimal montant) {
+    public AccountResponseDTO deposit(Long accountId, BigDecimal montant) {
         Account account = accountRepository.findById(accountId)
-            .orElseThrow(() -> new IllegalArgumentException("Compte non trouvé avec l'id: " + accountId));
+            .orElseThrow(() -> new AccountNotFoundException("Compte non trouvé avec l'id: " + accountId));
         
         account.setSolde(account.getSolde().add(montant));
         Account updatedAccount = accountRepository.save(account);
         
+        Transaction transaction = new Transaction();
+        transaction.setAccount(account);
+        transaction.setType(Transaction.TYPE_DEPOT);
+        transaction.setMontant(montant);
+        transaction.setStatut(Transaction.STATUT_COMPLETEE);
+        transactionRepository.save(transaction);
+        
         return convertToDTO(updatedAccount);
     }
 
-    public AccountResponseDTO withdraw(Long accountId, java.math.BigDecimal montant) {
+    public AccountResponseDTO withdraw(Long accountId, BigDecimal montant) {
         Account account = accountRepository.findById(accountId)
-            .orElseThrow(() -> new IllegalArgumentException("Compte non trouvé avec l'id: " + accountId));
+            .orElseThrow(() -> new AccountNotFoundException("Compte non trouvé avec l'id: " + accountId));
         
         if (account.getSolde().compareTo(montant) < 0) {
+            Transaction transaction = new Transaction();
+            transaction.setAccount(account);
+            transaction.setType(Transaction.TYPE_RETRAIT);
+            transaction.setMontant(montant);
+            transaction.setStatut(Transaction.STATUT_ECHEC);
+            transactionRepository.save(transaction);
+            
             throw new InsufficientFundsException("Solde insuffisant pour effectuer ce retrait");
         }
         
         account.setSolde(account.getSolde().subtract(montant));
         Account updatedAccount = accountRepository.save(account);
         
+        Transaction transaction = new Transaction();
+        transaction.setAccount(account);
+        transaction.setType(Transaction.TYPE_RETRAIT);
+        transaction.setMontant(montant);
+        transaction.setStatut(Transaction.STATUT_COMPLETEE);
+        transactionRepository.save(transaction);
+        
         return convertToDTO(updatedAccount);
     }
 
-    /**
-     * Récupère la liste de tous les comptes
-     * @return liste des comptes triée par date de création (récent d'abord)
-     */
     @Transactional(readOnly = true)
     public List<AccountResponseDTO> getAllAccounts() {
         return accountRepository.findAll()
@@ -81,11 +99,37 @@ public class AccountService {
             .collect(Collectors.toList());
     }
 
-    /**
-     * Convertit une entité Account en DTO
-     * @param account l'entité Account
-     * @return le DTO correspondant
-     */
+    public SoldeResponseDTO getSolde(Long accountId) {
+        Account account = accountRepository.findById(accountId)
+            .orElseThrow(() -> new AccountNotFoundException("Compte non trouvé avec l'id: " + accountId));
+        
+        return new SoldeResponseDTO(
+            account.getId(),
+            account.getTitulaire(),
+            account.getSolde(),
+            account.getStatut()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<TransactionResponseDTO> getTransactionHistory(Long accountId) {
+        if (!accountRepository.existsById(accountId)) {
+            throw new AccountNotFoundException("Compte non trouvé avec l'id: " + accountId);
+        }
+        
+        return transactionRepository.findByAccountIdOrderByDateTransactionDesc(accountId)
+            .stream()
+            .map(this::convertTransactionToDTO)
+            .collect(Collectors.toList());
+    }
+
+    public void deleteAccount(Long accountId) {
+        if (!accountRepository.existsById(accountId)) {
+            throw new AccountNotFoundException("Compte non trouvé avec l'id: " + accountId);
+        }
+        accountRepository.deleteById(accountId);
+    }
+
     private AccountResponseDTO convertToDTO(Account account) {
         return new AccountResponseDTO(
             account.getId(),
@@ -95,6 +139,17 @@ public class AccountService {
             account.getSolde(),
             account.getDateCreation(),
             account.getStatut()
+        );
+    }
+
+    private TransactionResponseDTO convertTransactionToDTO(Transaction transaction) {
+        return new TransactionResponseDTO(
+            transaction.getId(),
+            transaction.getAccount().getId(),
+            transaction.getType(),
+            transaction.getMontant(),
+            transaction.getStatut(),
+            transaction.getDateTransaction()
         );
     }
 }

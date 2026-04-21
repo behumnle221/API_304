@@ -1,9 +1,9 @@
 com\bank\BankApplication.class
+com\bank\repository\AccountRepository.class
+com\bank\dto\AccountResponseDTO.class
+com\bank\exception\GlobalExceptionHandler.class
 com\bank\controller\AccountController.class
 com\bank\dto\CreateAccountDTO.class
 com\bank\model\Account.class
 com\bank\exception\AccountAlreadyExistsException.class
 com\bank\service\AccountService.class
-com\bank\repository\AccountRepository.class
-com\bank\dto\AccountResponseDTO.class
-com\bank\exception\GlobalExceptionHandler.class
